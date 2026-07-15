@@ -25,12 +25,22 @@ public class UrlShortenerService {
             return mapToResponse(existing.get(), baseUrl);
         }
 
-        // TODO: write logic to convert originalURL to shortURL with the help of users alias
-        // TODO: write logic to convert originalURL to shortURL using base62Encode
+
+        // Convert originalURL to shortURL with alias
+        if(alias != null && !alias.isBlank()) {
+            if (repository.findByShortCode(alias).isPresent()) {
+                throw new RuntimeException("Alias already taken: " + alias);
+            }
+        }
 
         UrlMapping urlMapping = new UrlMapping();
+        urlMapping.setOriginalUrl(originalUrl);
+        urlMapping.setShortCode(alias);
+        UrlMapping savedMapping = repository.save(urlMapping);
 
-        return mapToResponse(urlMapping, baseUrl);
+        return mapToResponse(savedMapping, baseUrl);
+
+        // TODO: write logic to convert originalURL to shortURL using base62Encode
 
     }
 
@@ -40,6 +50,8 @@ public class UrlShortenerService {
                 .orElseThrow(() -> new RuntimeException("Short code not found: " + shortCode));
     }
 
+
+    // Response Mapping
     private UrlShortenResponse mapToResponse(UrlMapping urlMapping, String baseUrl) {
         return new UrlShortenResponse(
                 urlMapping.getId(),
