@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.util.Optional;
 
 @Service
@@ -20,6 +21,10 @@ public class UrlShortenerService {
 
     @Transactional
     public UrlShortenResponse shortenUrl(String originalUrl, String alias, String baseUrl) {
+
+        // Validate URL
+        validateUrl(originalUrl);
+
 
         // Check if already exists (idempotent behavior)
         Optional<UrlMapping> existing = repository.findByOriginalUrl(originalUrl);
@@ -76,6 +81,22 @@ public class UrlShortenerService {
 
         return sb.reverse().toString();
     }
+
+
+    // URL validator
+    private void validateUrl(String url) {
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid URL: " + url);
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || (!scheme.equals("http") && !scheme.equals("https"))) {
+            throw new IllegalArgumentException("Only http/https URLs are allowed.");
+        }
+    }
+
 
     // Response Mapping
     private UrlShortenResponse mapToResponse(UrlMapping urlMapping, String baseUrl, String message) {
