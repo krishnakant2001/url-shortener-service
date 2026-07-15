@@ -23,8 +23,7 @@ public class UrlShortenerController {
 
         String baseUrl = getBaseUrl(httpServletRequest);
 
-        // TODO: Call service to do url short
-        UrlShortenResponse response = null;
+        UrlShortenResponse response = service.shortenUrl(request.getUrl(), request.getAlias(), baseUrl);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -32,8 +31,7 @@ public class UrlShortenerController {
     @GetMapping("/{code}")
     public ResponseEntity<Void> redirect(@PathVariable String code) {
 
-        // TODO: Call service to get original Url
-        String originalUrl = null;
+        String originalUrl = service.getOriginalUrl(code);
 
         return ResponseEntity.status(HttpStatus.MOVED_PERMANENTLY)
                 .header(HttpHeaders.LOCATION, originalUrl)
