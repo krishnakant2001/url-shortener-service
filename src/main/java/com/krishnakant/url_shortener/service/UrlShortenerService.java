@@ -14,6 +14,7 @@ import java.util.Optional;
 public class UrlShortenerService {
 
     private final UrlMappingRepository repository;
+    private static final String BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     @Transactional
     public UrlShortenResponse shortenUrl(String originalUrl, String alias, String baseUrl) {
@@ -31,16 +32,26 @@ public class UrlShortenerService {
             if (repository.findByShortCode(alias).isPresent()) {
                 throw new RuntimeException("Alias already taken: " + alias);
             }
+
+            UrlMapping urlMapping = new UrlMapping();
+            urlMapping.setOriginalUrl(originalUrl);
+            urlMapping.setShortCode(alias);
+            UrlMapping savedMapping = repository.save(urlMapping);
+
+            return mapToResponse(savedMapping, baseUrl);
         }
 
+
+        // Convert originalURL to shortURL using base62Encode
         UrlMapping urlMapping = new UrlMapping();
         urlMapping.setOriginalUrl(originalUrl);
-        urlMapping.setShortCode(alias);
         UrlMapping savedMapping = repository.save(urlMapping);
 
-        return mapToResponse(savedMapping, baseUrl);
+        String shortCode = base62Encode(savedMapping.getId());
+        repository.updateShortCode(savedMapping.getId(), shortCode);
 
-        // TODO: write logic to convert originalURL to shortURL using base62Encode
+        savedMapping.setShortCode(shortCode);
+        return mapToResponse(savedMapping, baseUrl);
 
     }
 
@@ -50,6 +61,19 @@ public class UrlShortenerService {
                 .orElseThrow(() -> new RuntimeException("Short code not found: " + shortCode));
     }
 
+
+    // Base62 Encoder
+    private String base62Encode(long value) {
+        StringBuilder sb = new StringBuilder();
+
+        while (value > 0) {
+            int remainder = (int) (value % 62);
+            sb.append(BASE62.charAt(remainder));
+            value /= 62;
+        }
+
+        return sb.reverse().toString();
+    }
 
     // Response Mapping
     private UrlShortenResponse mapToResponse(UrlMapping urlMapping, String baseUrl) {
