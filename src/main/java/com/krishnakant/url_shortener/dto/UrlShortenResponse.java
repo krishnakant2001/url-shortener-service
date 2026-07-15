@@ -10,5 +10,6 @@ public class UrlShortenResponse {
     private final String originalUrl;
     private final String shortCode;
     private final String shortUrl;
+    private final String message;
     private final Instant createdAt;
 }
