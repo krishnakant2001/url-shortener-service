@@ -70,7 +70,7 @@ class UrlShortenerServiceTest {
         UrlMapping saved = buildMapping(5L, ORIGINAL_URL, alias);
 
         when(repository.findByOriginalUrl(ORIGINAL_URL)).thenReturn(Optional.empty());
-        when(repository.findByShortCode(alias)).thenReturn(Optional.empty());
+        when(repository.existsByShortCodeIgnoreCase(alias.toLowerCase())).thenReturn(false);
         when(repository.save(any(UrlMapping.class))).thenReturn(saved);
 
         UrlShortenResponse response = service.shortenUrl(ORIGINAL_URL, alias, BASE_URL);
@@ -79,13 +79,14 @@ class UrlShortenerServiceTest {
         assertThat(response.getShortUrl()).isEqualTo(BASE_URL + "/" + alias);
         assertThat(response.getMessage()).isEqualTo("Created successfully with alias");
         verify(repository, never()).updateShortCode(anyLong(), anyString());
+        verify(repository).existsByShortCodeIgnoreCase(alias.toLowerCase());
     }
 
     @Test
     void shortenUrl_aliasTaken_throwsAliasAlreadyExistsException() {
         String alias = "taken";
         when(repository.findByOriginalUrl(ORIGINAL_URL)).thenReturn(Optional.empty());
-        when(repository.findByShortCode(alias)).thenReturn(Optional.of(buildMapping(2L, "https://other.com", alias)));
+        when(repository.existsByShortCodeIgnoreCase(alias.toLowerCase())).thenReturn(true);
 
         assertThatThrownBy(() -> service.shortenUrl(ORIGINAL_URL, alias, BASE_URL))
                 .isInstanceOf(AliasAlreadyExistsException.class)
@@ -94,46 +95,53 @@ class UrlShortenerServiceTest {
         verify(repository, never()).save(any());
     }
 
-    // ── shortenUrl: base62 encoding ───────────────────────────────────────
+    // ── shortenUrl: SecureRandom short code generation ───────────────────────────────────────
 
     @Test
-    void shortenUrl_newUrlWithoutAlias_id1_generatesBase62Code() {
-        UrlMapping saved = buildMapping(1L, ORIGINAL_URL, null);
+    void shortenUrl_newUrlWithoutAlias_generatesRandomShortCode() {
+        String generateCode = "abc1234";
+        UrlMapping saved = buildMapping(1L, ORIGINAL_URL, generateCode);
+
         when(repository.findByOriginalUrl(ORIGINAL_URL)).thenReturn(Optional.empty());
+        when(repository.existsByShortCode(anyString())).thenReturn(false);
         when(repository.save(any(UrlMapping.class))).thenReturn(saved);
 
         UrlShortenResponse response = service.shortenUrl(ORIGINAL_URL, null, BASE_URL);
 
-        assertThat(response.getShortCode()).isEqualTo("1");
-        assertThat(response.getShortUrl()).isEqualTo(BASE_URL + "/1");
-        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 encoding");
-        verify(repository).updateShortCode(1L, "1");
+        assertThat(response.getShortCode()).isEqualTo(generateCode);
+        assertThat(response.getShortUrl()).isEqualTo(BASE_URL + "/" + generateCode);
+        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 random secure code");
+        verify(repository, never()).updateShortCode(anyLong(), anyString());
+        verify(repository).existsByShortCode(anyString());
     }
 
     @Test
-    void shortenUrl_newUrlWithoutAlias_id62_producesBase62Code10() {
-        // 62 in base62 → "10"
-        UrlMapping saved = buildMapping(62L, ORIGINAL_URL, null);
+    void shortenUrl_shortCodeCollision_retriesAndSucceeds() {
+        String freeCode = "free123";
+        UrlMapping saved = buildMapping(62L, ORIGINAL_URL, freeCode);
         when(repository.findByOriginalUrl(ORIGINAL_URL)).thenReturn(Optional.empty());
+        when(repository.existsByShortCode(anyString()))
+                .thenReturn(true)
+                .thenReturn(false);
         when(repository.save(any(UrlMapping.class))).thenReturn(saved);
 
         UrlShortenResponse response = service.shortenUrl(ORIGINAL_URL, null, BASE_URL);
 
-        assertThat(response.getShortCode()).isEqualTo("10");
-        verify(repository).updateShortCode(62L, "10");
+        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 random secure code");
+        verify(repository, never()).updateShortCode(anyLong(), anyString());
     }
 
     @Test
-    void shortenUrl_newUrlWithoutAlias_id3844_producesBase62Code100() {
-        // 62^2 = 3844 → "100"
-        UrlMapping saved = buildMapping(3844L, ORIGINAL_URL, null);
+    void shortenUrl_allAttemptExhausted_throwsRuntimeException() {
+        // All 5 attempts produce a collision
         when(repository.findByOriginalUrl(ORIGINAL_URL)).thenReturn(Optional.empty());
-        when(repository.save(any(UrlMapping.class))).thenReturn(saved);
+        when(repository.existsByShortCode(anyString())).thenReturn(true);
 
-        UrlShortenResponse response = service.shortenUrl(ORIGINAL_URL, null, BASE_URL);
+        assertThatThrownBy(() -> service.shortenUrl(ORIGINAL_URL, null, BASE_URL))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Short code generation failed, please retry");
 
-        assertThat(response.getShortCode()).isEqualTo("100");
-        verify(repository).updateShortCode(3844L, "100");
+        verify(repository, never()).save(any());
     }
 
     // ── shortenUrl: URL validation ─────────────────────────────────────────
@@ -159,19 +167,22 @@ class UrlShortenerServiceTest {
                 .hasMessageContaining("Invalid URL");
     }
 
-    // ── edge case: blank alias fall back to base 62 ─────────────────────────
+    // ── edge case: blank alias fall back to random SecureRandom code ─────────────────────────
 
     @Test
-    void shortenUrl_blankAlias_treatedAsNoAlias_generateBase62Code() {
-        UrlMapping saved = buildMapping(1L, ORIGINAL_URL, null);
+    void shortenUrl_blankAlias_treatedAsNoAlias_generateRandomShortCode() {
+        String generatedCode = "xyz9876";
+        UrlMapping saved = buildMapping(1L, ORIGINAL_URL, generatedCode);
         when(repository.findByOriginalUrl(ORIGINAL_URL)).thenReturn(Optional.empty());
+        when(repository.existsByShortCode(anyString())).thenReturn(false);
         when(repository.save((any(UrlMapping.class)))).thenReturn(saved);
 
         UrlShortenResponse response = service.shortenUrl(ORIGINAL_URL, "    ", BASE_URL);
 
-        assertThat(response.getShortCode()).isEqualTo("1");
-        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 encoding");
+        assertThat(response.getShortCode()).isEqualTo(generatedCode);
+        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 random secure code");
         verify(repository, never()).findByShortCode(anyString());
+        verify(repository, never()).existsByShortCodeIgnoreCase(anyString());
     }
 
     // ── edge case: http (not just https) is accepted ────────────────────────
@@ -179,14 +190,16 @@ class UrlShortenerServiceTest {
     @Test
     void shortenUrl_httpUrl_isAccepted() {
         String httpUrl = "http://www.example.com/page";
-        UrlMapping saved = buildMapping(2L, httpUrl, null);
+        String generatedCode = "httpCode";
+        UrlMapping saved = buildMapping(2L, httpUrl, generatedCode);
         when(repository.findByOriginalUrl(httpUrl)).thenReturn(Optional.empty());
+        when(repository.existsByShortCode(anyString())).thenReturn(false);
         when(repository.save((any(UrlMapping.class)))).thenReturn(saved);
 
         UrlShortenResponse response = service.shortenUrl(httpUrl, null, BASE_URL);
 
         assertThat(response.getOriginalUrl()).isEqualTo(httpUrl);
-        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 encoding");
+        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 random secure code");
     }
 
     // ── edge case: URL with query parameters ───────────────────────────────
@@ -194,14 +207,16 @@ class UrlShortenerServiceTest {
     @Test
     void shortenUrl_urlWithQueryParams_isAccepted() {
         String urlWithParams = "http://www.example.com/search?q=hello+world&page=1";
-        UrlMapping saved = buildMapping(3L, urlWithParams, null);
+        String generatedCode = "qryCode1";
+        UrlMapping saved = buildMapping(3L, urlWithParams, generatedCode);
         when(repository.findByOriginalUrl(urlWithParams)).thenReturn(Optional.empty());
+        when(repository.existsByShortCode(anyString())).thenReturn(false);
         when(repository.save((any(UrlMapping.class)))).thenReturn(saved);
 
         UrlShortenResponse response = service.shortenUrl(urlWithParams, null, BASE_URL);
 
         assertThat(response.getOriginalUrl()).isEqualTo(urlWithParams);
-        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 encoding");
+        assertThat(response.getMessage()).isEqualTo("Created successfully with base62 random secure code");
     }
 
     // ── getOriginalUrl ─────────────────────────────────────────────────────
