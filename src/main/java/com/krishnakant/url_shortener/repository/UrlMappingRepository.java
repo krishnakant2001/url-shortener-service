@@ -25,6 +25,19 @@ public interface UrlMappingRepository extends JpaRepository<UrlMapping, Long> {
 
 
     /**
+     * Lightweight existence check, avoids fetching the full entity
+     */
+    boolean existsByShortCode(String code);
+
+
+    /**
+     * Lightweight existence check with case-insensitive
+     * Avoids fetching the full entity
+     */
+    boolean existsByShortCodeIgnoreCase(String shortCode);
+
+
+    /**
      * Called after INSERT to write the base62(id) short code back.
      * Runs as part of the same @Transactional in the service.
      */

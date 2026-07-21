@@ -10,14 +10,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
+import java.security.SecureRandom;
 import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class UrlShortenerService {
 
-    private final UrlMappingRepository repository;
+    private static final int SHORT_CODE_LENGTH = 7;
+    private static final int MAX_ATTEMPTS_TO_GENERATE_SHORT_CODE = 5;
     private static final String BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    private final UrlMappingRepository repository;
+    private final SecureRandom random = new SecureRandom();
+
 
     @Transactional
     public UrlShortenResponse shortenUrl(String originalUrl, String alias, String baseUrl) {
@@ -36,8 +42,10 @@ public class UrlShortenerService {
 
         // Convert originalURL to shortURL with alias
         if(alias != null && !alias.isBlank()) {
-            if (repository.findByShortCode(alias).isPresent()) {
-                throw new AliasAlreadyExistsException(alias);
+            String normalizedAlias = alias.toLowerCase();
+
+            if (repository.existsByShortCodeIgnoreCase(normalizedAlias)) {
+                throw new AliasAlreadyExistsException(normalizedAlias);
             }
 
             UrlMapping urlMapping = new UrlMapping();
@@ -49,23 +57,43 @@ public class UrlShortenerService {
         }
 
 
-        // Convert originalURL to shortURL using base62Encode
+        // Convert originalURL to shortURL using Base62 random short code
+        String shortCode = generateUniqueShortCode();
+
         UrlMapping urlMapping = new UrlMapping();
         urlMapping.setOriginalUrl(originalUrl);
+        urlMapping.setShortCode(shortCode);
         UrlMapping savedMapping = repository.save(urlMapping);
 
-        String shortCode = base62Encode(savedMapping.getId());
-        repository.updateShortCode(savedMapping.getId(), shortCode);
-
-        savedMapping.setShortCode(shortCode);
-        return mapToResponse(savedMapping, baseUrl, "Created successfully with base62 encoding");
-
+        return mapToResponse(savedMapping, baseUrl, "Created successfully with base62 random secure code");
     }
 
     public String getOriginalUrl(String shortCode) {
         return repository.findByShortCode(shortCode)
                 .map(urlMapping -> urlMapping.getOriginalUrl())
                 .orElseThrow(() -> new UrlNotFoundException(shortCode));
+    }
+
+
+    // Retries up to maximum times to find a unique short code
+    private String generateUniqueShortCode() {
+        for(int attempt = 0; attempt < MAX_ATTEMPTS_TO_GENERATE_SHORT_CODE; attempt++) {
+            String code = generateShortCode();
+            if (!repository.existsByShortCode(code)) {
+                return code;
+            }
+        }
+        throw new RuntimeException("Short code generation failed, please retry");
+    }
+
+
+    // Generates a random Base62 short code using SecureRandom
+    private String generateShortCode() {
+        StringBuilder sb = new StringBuilder(SHORT_CODE_LENGTH);
+        for(int i = 0; i < SHORT_CODE_LENGTH; i++) {
+            sb.append(BASE62.charAt(random.nextInt(BASE62.length())));
+        }
+        return sb.toString();
     }
 
 
